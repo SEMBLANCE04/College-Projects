@@ -7,23 +7,32 @@ const AppError = require('../utils/appError');
 const sendEmail = require('../utils/email');
 
 // Create JWT token
-const signToken = id => {
+const signToken = (id, expiresIn = '1h') => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
-    expiresIn: process.env.JWT_EXPIRES_IN
+    expiresIn
+  });
+};
+
+// Create refresh token
+const signRefreshToken = (id) => {
+  return jwt.sign({ id }, process.env.JWT_SECRET, {
+    expiresIn: '7d'
   });
 };
 
 // Send JWT token in response
 const createSendToken = (user, statusCode, res) => {
   const token = signToken(user._id);
+  const refreshToken = signRefreshToken(user._id);
+
   const cookieOptions = {
-    expires: new Date(
-      Date.now() + process.env.JWT_COOKIE_EXPIRES_IN * 24 * 60 * 60 * 1000
-    ),
+    expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
     httpOnly: true
   };
   
   if (process.env.NODE_ENV === 'production') cookieOptions.secure = true;
+
+  res.cookie('refreshToken', refreshToken, cookieOptions);
 
   // Remove password from output
   user.password = undefined;
@@ -31,6 +40,7 @@ const createSendToken = (user, statusCode, res) => {
   res.status(statusCode).json({
     status: 'success',
     token,
+    refreshToken,
     data: {
       user
     }
@@ -87,30 +97,59 @@ exports.protect = catchAsync(async (req, res, next) => {
     );
   }
 
-  // 2) Verification token
-  const decoded = await promisify(jwt.verify)(token, process.env.JWT_SECRET);
+  try {
+    // 2) Verification token
+    const decoded = await promisify(jwt.verify)(token, process.env.JWT_SECRET);
 
-  // 3) Check if user still exists
-  const currentUser = await User.findById(decoded.id);
-  if (!currentUser) {
-    return next(
-      new AppError(
-        'The user belonging to this token does no longer exist.',
-        401
-      )
-    );
+    // 3) Check if user still exists
+    const currentUser = await User.findById(decoded.id);
+    if (!currentUser) {
+      return next(
+        new AppError(
+          'The user belonging to this token does no longer exist.',
+          401
+        )
+      );
+    }
+
+    // 4) Check if user changed password after the token was issued
+    if (currentUser.changedPasswordAfter(decoded.iat)) {
+      return next(
+        new AppError('User recently changed password! Please log in again.', 401)
+      );
+    }
+
+    // GRANT ACCESS TO PROTECTED ROUTE
+    req.user = currentUser;
+    return next();
+  } catch (error) {
+    if (error.name === 'TokenExpiredError') {
+      // Try to use refresh token
+      const refreshToken = req.cookies.refreshToken;
+      if (!refreshToken) {
+        return next(new AppError('Token expired. Please log in again.', 401));
+      }
+
+      try {
+        const decoded = await promisify(jwt.verify)(refreshToken, process.env.JWT_SECRET);
+        const refreshedUser = await User.findById(decoded.id);
+
+        if (!refreshedUser) {
+          return next(new AppError('User no longer exists.', 401));
+        }
+
+        // Generate new access token
+        const newToken = signToken(refreshedUser._id);
+        res.set('Authorization', `Bearer ${newToken}`);
+        req.user = refreshedUser;
+        return next();
+      } catch (refreshError) {
+        return next(new AppError('Please log in again.', 401));
+      }
+    } else {
+      return next(new AppError('Invalid token. Please log in again.', 401));
+    }
   }
-
-  // 4) Check if user changed password after the token was issued
-  if (currentUser.changedPasswordAfter(decoded.iat)) {
-    return next(
-      new AppError('User recently changed password! Please log in again.', 401)
-    );
-  }
-
-  // GRANT ACCESS TO PROTECTED ROUTE
-  req.user = currentUser;
-  next();
 });
 
 // Restrict routes to certain user roles

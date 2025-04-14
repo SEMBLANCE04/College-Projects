@@ -3,7 +3,7 @@ const Package = require('../models/Package');
 const User = require('../models/User');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const QRCode = require('qrcode');
 const sendEmail = require('../utils/email');
 
 // Get all bookings - Admin only
@@ -53,71 +53,81 @@ exports.getBooking = catchAsync(async (req, res, next) => {
   });
 });
 
-// Create checkout session
-exports.getCheckoutSession = catchAsync(async (req, res, next) => {
-  // 1) Get the currently booked package
-  const package = await Package.findById(req.params.packageId);
-
-  if (!package) {
-    return next(new AppError('No package found with that ID', 404));
-  }
-
-  // 2) Calculate total price based on travelers and additional services
-  const { startDate, endDate, travelers, additionalServices } = req.body;
-
-  if (!startDate || !endDate || !travelers) {
-    return next(new AppError('Please provide startDate, endDate, and travelers', 400));
-  }
-
-  // Calculate base price
-  const basePrice = package.price * travelers.adults + (package.price * 0.7 * travelers.children);
-  
-  // Calculate additional services price
-  let additionalServicesPrice = 0;
-  if (additionalServices && additionalServices.length > 0) {
-    additionalServicesPrice = additionalServices.reduce((total, service) => total + service.price, 0);
-  }
-
-  const totalAmount = basePrice + additionalServicesPrice;
-
-  // 3) Create checkout session
-  const session = await stripe.checkout.sessions.create({
-    payment_method_types: ['card'],
-    success_url: `${process.env.CLIENT_URL}/bookings/success?session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${process.env.CLIENT_URL}/packages/${package.id}`,
-    customer_email: req.user.email,
-    client_reference_id: req.params.packageId,
-    line_items: [
-      {
-        price_data: {
-          currency: 'usd',
-          product_data: {
-            name: `${package.name} Tour`,
-            description: package.summary,
-            images: [package.imageCover],
-          },
-          unit_amount: Math.round(totalAmount * 100), // Convert to cents
-        },
-        quantity: 1,
-      },
-    ],
-    mode: 'payment',
-    metadata: {
-      startDate,
-      endDate,
-      adults: travelers.adults,
-      children: travelers.children || 0,
-      additionalServices: JSON.stringify(additionalServices || []),
-      specialRequests: req.body.specialRequests || ''
+// Create new booking
+exports.createBooking = async (req, res, next) => {
+  try {
+    // 1) Get the package
+    const package = await Package.findById(req.params.packageId);
+    if (!package) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Package not found'
+      });
     }
-  });
 
-  // 4) Create session as response
-  res.status(200).json({
-    status: 'success',
-    session
-  });
-});
+    // 2) Get booking details
+    const { travelDate, numberOfTravelers } = req.body;
+    if (!travelDate || !numberOfTravelers) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Please provide travel date and number of travelers'
+      });
+    }
+
+    // 3) Calculate total price
+    const totalAmount = package.price * numberOfTravelers;
+
+    // 4) Create booking
+    const booking = await Booking.create({
+      package: package.id,
+      user: req.user.id,
+      price: package.price,
+      totalAmount: totalAmount,
+      startDate: new Date(travelDate),
+      endDate: new Date(travelDate), // For single day packages
+      travelers: {
+        adults: numberOfTravelers,
+        children: 0
+      },
+      status: 'confirmed',
+      paymentStatus: 'pending',
+      bookingReference: Math.random().toString(36).substring(2, 10).toUpperCase()
+    });
+
+    // 5) Generate QR code
+    const qrData = JSON.stringify({
+      bookingId: booking._id,
+      package: package.title,
+      date: travelDate,
+      travelers: numberOfTravelers,
+      amount: totalAmount,
+      reference: booking.bookingReference
+    });
+
+    const qrCode = await QRCode.toDataURL(qrData);
+
+    res.status(201).json({
+      status: 'success',
+      data: {
+        booking,
+        qrCode,
+        paymentDetails: {
+          amount: totalAmount,
+          reference: booking.bookingReference,
+          accountName: 'Travel Agency',
+          accountNumber: '1234567890',
+          bankName: 'Example Bank'
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Booking error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error creating booking'
+    });
+  }
+};
 
 // Create booking after successful payment
 exports.createBookingCheckout = catchAsync(async (req, res, next) => {

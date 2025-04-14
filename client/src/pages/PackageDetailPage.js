@@ -1,17 +1,24 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { Helmet } from 'react-helmet-async';
 import { getPackage } from '../redux/features/packages/packageSlice';
 import Loader from '../components/common/Loader';
 import { FiMapPin, FiCalendar, FiClock, FiUsers, FiCheck, FiX, FiStar } from 'react-icons/fi';
+import axios from '../utils/axios';
+import { toast } from 'react-toastify';
 
 const PackageDetailPage = () => {
   const { id } = useParams();
+  const navigate = useNavigate();
   const dispatch = useDispatch();
   const { package: tourPackage, loading } = useSelector((state) => state.packages);
+  const { isAuthenticated } = useSelector((state) => state.auth);
   const [selectedDate, setSelectedDate] = useState('');
   const [travelers, setTravelers] = useState(1);
+  const [isLoading, setIsLoading] = useState(false);
+  const [showBookingModal, setShowBookingModal] = useState(false);
+  const [bookingData, setBookingData] = useState(null);
 
   useEffect(() => {
     if (id) {
@@ -35,11 +42,101 @@ const PackageDetailPage = () => {
     );
   }
 
-  const handleBookNow = () => {
-    // Implement booking logic
-    console.log('Booking package with ID:', id);
-    console.log('Selected date:', selectedDate);
-    console.log('Number of travelers:', travelers);
+  const handleBookNow = async () => {
+    if (!isAuthenticated) {
+      toast.error('Please login to book a package');
+      navigate('/login');
+      return;
+    }
+
+    if (!selectedDate) {
+      toast.error('Please select a travel date');
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+      const response = await axios.post(`/bookings/create/${id}`, {
+        travelDate: selectedDate,
+        numberOfTravelers: travelers
+      });
+
+      if (response.data && response.data.status === 'success') {
+        setBookingData(response.data.data);
+        setShowBookingModal(true);
+      } else {
+        throw new Error('Invalid response from server');
+      }
+    } catch (error) {
+      console.error('Booking error:', error);
+      toast.error(error.response?.data?.message || 'Failed to process booking. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const BookingSuccessModal = () => {
+    if (!bookingData) return null;
+
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div className="bg-white rounded-lg p-6 max-w-lg w-full">
+          <h3 className="text-2xl font-bold mb-4 text-center text-green-600">Booking Successful!</h3>
+          
+          <div className="mb-6">
+            <img 
+              src={bookingData.qrCode} 
+              alt="Payment QR Code" 
+              className="mx-auto w-48 h-48"
+            />
+          </div>
+
+          <div className="space-y-4 mb-6">
+            <div className="border-b pb-2">
+              <h4 className="font-semibold">Booking Reference</h4>
+              <p className="text-lg">{bookingData.paymentDetails.reference}</p>
+            </div>
+
+            <div className="border-b pb-2">
+              <h4 className="font-semibold">Payment Details</h4>
+              <p>Amount: ${bookingData.paymentDetails.amount}</p>
+              <p>Bank: {bookingData.paymentDetails.bankName}</p>
+              <p>Account: {bookingData.paymentDetails.accountNumber}</p>
+              <p>Account Name: {bookingData.paymentDetails.accountName}</p>
+            </div>
+
+            <div>
+              <p className="text-sm text-gray-600">
+                Please complete your payment using the QR code or bank details above.
+                Your booking will be confirmed once payment is received.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex justify-end space-x-4">
+            <button
+              onClick={() => setShowBookingModal(false)}
+              className="px-4 py-2 bg-gray-200 text-gray-800 rounded hover:bg-gray-300 transition-colors"
+            >
+              Close
+            </button>
+            <button
+              onClick={() => {
+                const element = document.createElement('a');
+                element.href = bookingData.qrCode;
+                element.download = `booking-${bookingData.paymentDetails.reference}.png`;
+                document.body.appendChild(element);
+                element.click();
+                document.body.removeChild(element);
+              }}
+              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+            >
+              Download QR
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -271,10 +368,10 @@ const PackageDetailPage = () => {
               
               <button
                 onClick={handleBookNow}
-                className="mt-6 block w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg text-center transition duration-300"
-                disabled={!selectedDate}
+                className={`mt-6 block w-full py-3 px-4 font-medium rounded-lg text-center transition duration-300 ${isLoading || !selectedDate ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}
+                disabled={isLoading || !selectedDate}
               >
-                Book Now
+                {isLoading ? 'Processing...' : 'Book Now'}
               </button>
               
               <p className="mt-4 text-sm text-gray-500 text-center">
@@ -284,6 +381,7 @@ const PackageDetailPage = () => {
           </div>
         </div>
       </div>
+      {showBookingModal && <BookingSuccessModal />}
     </>
   );
 };

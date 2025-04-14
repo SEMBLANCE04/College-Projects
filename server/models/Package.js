@@ -2,9 +2,9 @@ const mongoose = require('mongoose');
 
 const packageSchema = new mongoose.Schema(
   {
-    name: {
+    title: {
       type: String,
-      required: [true, 'A package must have a name'],
+      required: [true, 'A package must have a title'],
       unique: true,
       trim: true
     },
@@ -13,8 +13,12 @@ const packageSchema = new mongoose.Schema(
       ref: 'Destination',
       required: [true, 'A package must belong to a destination']
     },
+    location: {
+      type: String,
+      required: [true, 'A package must have a location']
+    },
     duration: {
-      type: Number,
+      type: String,
       required: [true, 'A package must have a duration']
     },
     maxGroupSize: {
@@ -23,11 +27,11 @@ const packageSchema = new mongoose.Schema(
     },
     difficulty: {
       type: String,
-      required: [true, 'A package must have a difficulty'],
       enum: {
         values: ['easy', 'medium', 'difficult'],
         message: 'Difficulty is either: easy, medium, or difficult'
-      }
+      },
+      default: 'medium'
     },
     price: {
       type: Number,
@@ -43,10 +47,9 @@ const packageSchema = new mongoose.Schema(
         message: 'Discount price ({VALUE}) should be below regular price'
       }
     },
-    summary: {
+    subtitle: {
       type: String,
-      trim: true,
-      required: [true, 'A package must have a summary']
+      trim: true
     },
     description: {
       type: String,

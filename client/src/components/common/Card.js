@@ -116,18 +116,27 @@ const Card = ({
         
         {/* Package Details */}
         {type === 'package' && (
-          <div className="flex justify-between items-center mt-4">
-            <div>
-              {duration && <span className="text-sm text-gray-600">{duration}</span>}
+          <>
+            <div className="flex justify-between items-center mt-4">
+              <div>
+                {duration && <span className="text-sm text-gray-600">{duration}</span>}
+              </div>
+              <div>
+                {price && (
+                  <span className="text-lg font-bold text-blue-600">
+                    ${typeof price === 'number' ? price.toLocaleString() : price}
+                  </span>
+                )}
+              </div>
             </div>
-            <div>
-              {price && (
-                <span className="text-lg font-bold text-blue-600">
-                  ${typeof price === 'number' ? price.toLocaleString() : price}
-                </span>
-              )}
-            </div>
-          </div>
+            <Link
+              to={`/packages/${id}`}
+              className="block w-full mt-4 bg-blue-600 text-white text-center py-2 px-4 rounded-md hover:bg-blue-700 transition-colors duration-200"
+            >
+              Book Now
+            </Link>
+
+          </>
         )}
         
         {/* Blog Date */}

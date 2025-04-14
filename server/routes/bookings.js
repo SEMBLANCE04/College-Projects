@@ -4,14 +4,11 @@ const authController = require('../controllers/authController');
 
 const router = express.Router();
 
-// Public routes
-router.get('/checkout-success', bookingController.createBookingCheckout);
-
 // Protected routes
 router.use(authController.protect);
 
 router.get('/my-bookings', bookingController.getMyBookings);
-router.post('/checkout-session/:packageId', bookingController.getCheckoutSession);
+router.post('/create/:packageId', bookingController.createBooking);
 router.patch('/cancel/:id', bookingController.cancelBooking);
 
 // Admin only routes

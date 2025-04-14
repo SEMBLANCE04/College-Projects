@@ -24,11 +24,14 @@ app.use(express.urlencoded({ extended: true }));
 
 // CORS Configuration
 app.use(cors({
-  origin: process.env.CLIENT_URL,
+  origin: ['http://localhost:3000', process.env.CLIENT_URL],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
+
+// Handle preflight requests
+app.options('*', cors());
 
 // Static files
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
